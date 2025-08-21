@@ -924,31 +924,32 @@ func (o *OperationV3) obtainExamples(commentLine string) ([]map[string]interface
 }
 
 func (o *OperationV3) parseAndAddExamples(response *spec.Response, examples []map[string]interface{}) {
+	const defaultMediaType = "application/json"
+
 	for _, exampleData := range examples {
 		// Process each key-value pair in the example JSON
-		for mediaType, body := range exampleData {
-			fmt.Println("adding example with name", mediaType)
-			fmt.Println("adding example with body", body)
+		for exampleName, body := range exampleData {
+			fmt.Println("adding example with name", exampleName)
 
-			// Add example to the response content for the specific media type
+			// Add example to the response content for application/json media type
 			if response.Content == nil {
 				response.Content = make(map[string]*spec.Extendable[spec.MediaType])
 			}
 
-			if response.Content[mediaType] == nil {
-				response.Content[mediaType] = spec.NewMediaType()
+			if response.Content[defaultMediaType] == nil {
+				response.Content[defaultMediaType] = spec.NewMediaType()
 			}
 
-			if response.Content[mediaType].Spec.Examples == nil {
-				response.Content[mediaType].Spec.Examples = make(map[string]*spec.RefOrSpec[spec.Extendable[spec.Example]])
+			if response.Content[defaultMediaType].Spec.Examples == nil {
+				response.Content[defaultMediaType].Spec.Examples = make(map[string]*spec.RefOrSpec[spec.Extendable[spec.Example]])
 			}
 
 			exampleSpec := spec.NewExampleSpec()
 			exampleSpec.Spec.Spec.Value = body
-			response.Content[mediaType].Spec.Examples[mediaType] = exampleSpec
+			response.Content[defaultMediaType].Spec.Examples[exampleName] = exampleSpec
 
 			// Print the original JSON string for each example
-			jsonBytes, _ := json.Marshal(map[string]interface{}{mediaType: body})
+			jsonBytes, _ := json.Marshal(map[string]interface{}{exampleName: body})
 			fmt.Print(string(jsonBytes))
 		}
 	}
