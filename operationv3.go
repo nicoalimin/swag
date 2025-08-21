@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -903,6 +904,66 @@ func newHeaderSpecV3(schemaType, description string) *spec.RefOrSpec[spec.Extend
 	return result
 }
 
+func (o *OperationV3) obtainExamples(commentLine string) string {
+	// Extract content surrounded by backticks
+	re := regexp.MustCompile("`([^`]*)`")
+	matches := re.FindAllStringSubmatch(commentLine, -1)
+
+	var examples []string
+	for _, match := range matches {
+		if len(match) > 1 {
+			examples = append(examples, match[1])
+		}
+	}
+
+	if len(examples) == 0 {
+		return ""
+	}
+
+	return strings.Join(examples, ",")
+}
+
+func (o *OperationV3) parseAndAddExamples(response *spec.Response, examplesStr string) {
+	examples := strings.Split(examplesStr, ",")
+	for _, example := range examples {
+		example = strings.TrimSpace(example)
+		if example == "" {
+			continue
+		}
+
+		// Parse JSON to extract key and body
+		var exampleData map[string]interface{}
+		if err := json.Unmarshal([]byte(example), &exampleData); err != nil {
+			fmt.Print(example)
+			continue
+		}
+
+		// Find the first key as the media type, rest as body
+		for mediaType, body := range exampleData {
+
+			// Add example to the response content for the specific media type
+			if response.Content == nil {
+				response.Content = make(map[string]*spec.Extendable[spec.MediaType])
+			}
+
+			if response.Content[mediaType] == nil {
+				response.Content[mediaType] = spec.NewMediaType()
+			}
+
+			if response.Content[mediaType].Spec.Examples == nil {
+				response.Content[mediaType].Spec.Examples = make(map[string]*spec.RefOrSpec[spec.Extendable[spec.Example]])
+			}
+
+			exampleSpec := spec.NewExampleSpec()
+			exampleSpec.Spec.Spec.Value = body
+			response.Content[mediaType].Spec.Examples[mediaType] = exampleSpec
+
+			fmt.Print(example)
+			break // Only use the first key-value pair
+		}
+	}
+}
+
 // ParseResponseComment parses comment for given `response` comment string.
 func (o *OperationV3) ParseResponseComment(commentLine string, astFile *ast.File) error {
 	matches := responsePattern.FindStringSubmatch(commentLine)
@@ -917,6 +978,9 @@ func (o *OperationV3) ParseResponseComment(commentLine string, astFile *ast.File
 
 	description := strings.Trim(matches[4], "\"")
 
+	examples := o.obtainExamples(commentLine)
+	fmt.Println("examples are", examples)
+
 	schema, err := o.parseAPIObjectSchema(commentLine, strings.Trim(matches[2], "{}"), strings.TrimSpace(matches[3]), astFile)
 	if err != nil {
 		return err
@@ -929,6 +993,10 @@ func (o *OperationV3) ParseResponseComment(commentLine string, astFile *ast.File
 
 			mimeType := "application/json" // TODO: set correct mimeType
 			setResponseSchema(response, mimeType, schema)
+
+			if examples != "" {
+				o.parseAndAddExamples(response, examples)
+			}
 
 			continue
 		}
@@ -947,6 +1015,10 @@ func (o *OperationV3) ParseResponseComment(commentLine string, astFile *ast.File
 
 		mimeType := "application/json" // TODO: set correct mimeType
 		setResponseSchema(response.Spec.Spec, mimeType, schema)
+
+		if examples != "" {
+			o.parseAndAddExamples(response.Spec.Spec, examples)
+		}
 
 		o.AddResponse(codeStr, response)
 	}
