@@ -973,6 +973,49 @@ func (operation *Operation) parseAPIObjectSchema(commentLine, schemaType, refTyp
 	}
 }
 
+func (operation *Operation) obtainExamples(commentLine string) string {
+	// Extract content surrounded by backticks
+	re := regexp.MustCompile("`([^`]*)`")
+	matches := re.FindAllStringSubmatch(commentLine, -1)
+
+	var examples []string
+	for _, match := range matches {
+		if len(match) > 1 {
+			examples = append(examples, match[1])
+		}
+	}
+
+	if len(examples) == 0 {
+		return ""
+	}
+
+	return strings.Join(examples, ",")
+}
+
+func (operation *Operation) parseAndAddExamples(resp *spec.Response, examplesStr string) {
+	examples := strings.Split(examplesStr, ",")
+	for _, example := range examples {
+		example = strings.TrimSpace(example)
+		if example == "" {
+			continue
+		}
+
+		// Parse JSON to extract key and body
+		var exampleData map[string]interface{}
+		if err := json.Unmarshal([]byte(example), &exampleData); err != nil {
+			fmt.Print(example)
+			continue
+		}
+
+		// Find the first key as the media type, rest as body
+		for mediaType, body := range exampleData {
+			resp.AddExample(mediaType, body)
+			fmt.Print(example)
+			break // Only use the first key-value pair
+		}
+	}
+}
+
 // ParseResponseComment parses comment for given `response` comment string.
 func (operation *Operation) ParseResponseComment(commentLine string, astFile *ast.File) error {
 	matches := responsePattern.FindStringSubmatch(commentLine)
@@ -987,6 +1030,8 @@ func (operation *Operation) ParseResponseComment(commentLine string, astFile *as
 
 	description := strings.Trim(matches[4], "\"")
 
+	examples := operation.obtainExamples(commentLine)
+
 	schema, err := operation.parseAPIObjectSchema(commentLine, strings.Trim(matches[2], "{}"), strings.TrimSpace(matches[3]), astFile)
 	if err != nil {
 		return err
@@ -994,7 +1039,10 @@ func (operation *Operation) ParseResponseComment(commentLine string, astFile *as
 
 	for _, codeStr := range strings.Split(matches[1], ",") {
 		if strings.EqualFold(codeStr, defaultTag) {
-			operation.DefaultResponse().WithSchema(schema).WithDescription(description)
+			defaultResp := operation.DefaultResponse().WithSchema(schema).WithDescription(description)
+			if examples != "" {
+				operation.parseAndAddExamples(defaultResp, examples)
+			}
 
 			continue
 		}
@@ -1007,6 +1055,10 @@ func (operation *Operation) ParseResponseComment(commentLine string, astFile *as
 		resp := spec.NewResponse().WithSchema(schema).WithDescription(description)
 		if description == "" {
 			resp.WithDescription(http.StatusText(code))
+		}
+
+		if examples != "" {
+			operation.parseAndAddExamples(resp, examples)
 		}
 
 		operation.AddResponse(code, resp)
