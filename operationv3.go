@@ -904,42 +904,31 @@ func newHeaderSpecV3(schemaType, description string) *spec.RefOrSpec[spec.Extend
 	return result
 }
 
-func (o *OperationV3) obtainExamples(commentLine string) string {
+func (o *OperationV3) obtainExamples(commentLine string) ([]map[string]interface{}, error) {
 	// Extract content surrounded by backticks
 	re := regexp.MustCompile("`([^`]*)`")
 	matches := re.FindAllStringSubmatch(commentLine, -1)
 
-	var examples []string
+	var examples []map[string]interface{}
 	for _, match := range matches {
 		if len(match) > 1 {
-			examples = append(examples, match[1])
+			var exampleData map[string]interface{}
+			if err := json.Unmarshal([]byte(match[1]), &exampleData); err != nil {
+				return nil, fmt.Errorf("invalid JSON in example: %s, error: %v", match[1], err)
+			}
+			examples = append(examples, exampleData)
 		}
 	}
 
-	if len(examples) == 0 {
-		return ""
-	}
-
-	return strings.Join(examples, ",")
+	return examples, nil
 }
 
-func (o *OperationV3) parseAndAddExamples(response *spec.Response, examplesStr string) {
-	examples := strings.Split(examplesStr, ",")
-	for _, example := range examples {
-		example = strings.TrimSpace(example)
-		if example == "" {
-			continue
-		}
-
-		// Parse JSON to extract key and body
-		var exampleData map[string]interface{}
-		if err := json.Unmarshal([]byte(example), &exampleData); err != nil {
-			fmt.Print(example)
-			continue
-		}
-
-		// Find the first key as the media type, rest as body
+func (o *OperationV3) parseAndAddExamples(response *spec.Response, examples []map[string]interface{}) {
+	for _, exampleData := range examples {
+		// Process each key-value pair in the example JSON
 		for mediaType, body := range exampleData {
+			fmt.Println("adding example with name", mediaType)
+			fmt.Println("adding example with body", body)
 
 			// Add example to the response content for the specific media type
 			if response.Content == nil {
@@ -958,8 +947,9 @@ func (o *OperationV3) parseAndAddExamples(response *spec.Response, examplesStr s
 			exampleSpec.Spec.Spec.Value = body
 			response.Content[mediaType].Spec.Examples[mediaType] = exampleSpec
 
-			fmt.Print(example)
-			break // Only use the first key-value pair
+			// Print the original JSON string for each example
+			jsonBytes, _ := json.Marshal(map[string]interface{}{mediaType: body})
+			fmt.Print(string(jsonBytes))
 		}
 	}
 }
@@ -978,8 +968,10 @@ func (o *OperationV3) ParseResponseComment(commentLine string, astFile *ast.File
 
 	description := strings.Trim(matches[4], "\"")
 
-	examples := o.obtainExamples(commentLine)
-	fmt.Println("examples are", examples)
+	examples, err := o.obtainExamples(commentLine)
+	if err != nil {
+		return err
+	}
 
 	schema, err := o.parseAPIObjectSchema(commentLine, strings.Trim(matches[2], "{}"), strings.TrimSpace(matches[3]), astFile)
 	if err != nil {
@@ -994,7 +986,7 @@ func (o *OperationV3) ParseResponseComment(commentLine string, astFile *ast.File
 			mimeType := "application/json" // TODO: set correct mimeType
 			setResponseSchema(response, mimeType, schema)
 
-			if examples != "" {
+			if len(examples) > 0 {
 				o.parseAndAddExamples(response, examples)
 			}
 
@@ -1016,7 +1008,7 @@ func (o *OperationV3) ParseResponseComment(commentLine string, astFile *ast.File
 		mimeType := "application/json" // TODO: set correct mimeType
 		setResponseSchema(response.Spec.Spec, mimeType, schema)
 
-		if examples != "" {
+		if len(examples) > 0 {
 			o.parseAndAddExamples(response.Spec.Spec, examples)
 		}
 
