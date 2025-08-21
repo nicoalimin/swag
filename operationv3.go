@@ -947,10 +947,6 @@ func (o *OperationV3) parseAndAddExamples(response *spec.Response, examples []ma
 			exampleSpec := spec.NewExampleSpec()
 			exampleSpec.Spec.Spec.Value = body
 			response.Content[defaultMediaType].Spec.Examples[exampleName] = exampleSpec
-
-			// Print the original JSON string for each example
-			jsonBytes, _ := json.Marshal(map[string]interface{}{exampleName: body})
-			fmt.Print(string(jsonBytes))
 		}
 	}
 }
@@ -967,7 +963,13 @@ func (o *OperationV3) ParseResponseComment(commentLine string, astFile *ast.File
 		return err
 	}
 
-	description := strings.Trim(matches[4], "\"")
+	// Find the first double-quoted string in the comment line
+	description := ""
+	if start := strings.Index(commentLine, "\""); start != -1 {
+		if end := strings.Index(commentLine[start+1:], "\""); end != -1 {
+			description = commentLine[start+1 : start+1+end]
+		}
+	}
 
 	examples, err := o.obtainExamples(commentLine)
 	if err != nil {
